@@ -1,0 +1,47 @@
+---
+title: "ds_mockup"
+author: "David Segan"
+date: "5/7/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(deSolve)
+library(sensitivity)
+```
+
+```{r}
+source("../esm232_hw6/ds_test_fgfx.R")
+
+# given parameters
+
+C = 10 # initial forest size of 10 kg C
+K = 250 # carrying capacity of 250 kg C
+f = 50 # canopy closure threshold of 50 kg C
+r = 0.01 # exponential growth rate before canopy closure
+g = 2 # linear growth rate after canopy closure of 2 kg/year
+
+```
+
+```{r}
+# run model for 300 years and graph results
+source("../esm232_hw6/ds_test_fgfx.R")
+
+# create parameter list
+initialcarbon=C
+years = seq(from=1, to=300, by=1)
+parms = list(r=0.01, K=250, f = 50, g = 2)
+
+#apply solver
+results=ode(initialcarbon, years, forest_growth,parms)
+
+# add more meaningful names
+colnames(results)=c("year","C")
+
+# plot
+ggplot(as.data.frame(results), aes(year,C))+geom_point()+labs(y="Forest Carbon (kg)", x="Year")
+```
+
