@@ -45,3 +45,77 @@ colnames(results)=c("year","C")
 ggplot(as.data.frame(results), aes(year,C))+geom_point()+labs(y="Forest Carbon (kg)", x="Year")
 ```
 
+```{r}
+# run a sobol sensitivity analysis
+# Q: how do estimated max and mean C vary with r, g, f, & K?
+# parms are normally distributed with sd 10% of mean value
+
+# set the number of parameters
+np=100
+# first set of samples
+K = rnorm(mean=250, sd=0.1*250, n=np)
+r = rnorm(mean=0.01, sd=0.1*0.01, n=np)
+f = rnorm(mean=50, sd=0.1*50, n=np)
+g = rnorm(mean=2, sd=0.1*2, n=np)
+X1 = cbind.data.frame(r=r, K=K, f=f, g=g)
+
+# repeat to get our second set of samples
+K = rnorm(mean=250, sd=0.1*250, n=np)
+r = rnorm(mean=0.01, sd=0.1*0.01, n=np)
+f = rnorm(mean=50, sd=0.1*50, n=np)
+g = rnorm(mean=2, sd=0.1*2, n=np)
+X2 = cbind.data.frame(r=r, K=K, f=f, g=g)
+
+# turn results into a data frame
+results = as.data.frame(results)
+
+# create our sobel object and get sets ofparameters for running the model
+sens_C = soboljansen(model = NULL,X1, X2, nboot = 300)
+
+# turn computing our metrics into a function
+compute_metrics = function(result) {
+  max = max(results$C)
+  mean = mean(results$C)
+return(list(max=max, mean=mean))}
+
+# try it on our first parameter set
+compute_metrics(results)
+
+# define a wrapper function to do everything we need - run solver and compute metrics - and send back results for each parameter
+simtimes = seq(from=1, to=300, by=1)
+
+c_wrapper = function(r,K,f,g, C, simtimes, func) {
+    parms = list(r=r, K=K, f=f, g=g)
+    results = ode(y=C, times=simtimes, func=func, parms=parms) 
+    colnames(result)=c("time","C")
+  # get metrics
+  metrics=compute_metrics(results)
+  return(metrics)
+}
+
+# now use pmap as we did before
+allresults = sens_C$X %>% pmap(c_wrapper, C=C, simtimes=simtimes, func=forest_growth)
+
+# extract out results from pmap into a data frame
+allres = allresults %>% map_dfr(`[`,c("max","mean"))
+
+# create boxplots
+tmp = allres %>% gather(key="metric", value="value")
+ggplot(tmp, aes(metric, value, col=metric))+geom_boxplot()
+
+```
+
+```{r}
+# sobol indice
+
+sens_C_max = sensitivity::tell(sens_C,allres$max)
+
+# first-order indices (main effect without co-variance)
+sens_C_max$S
+
+# total sensitivity index -note that this partitions the output variance - so values sum to 1
+sens_C_max$T
+
+plot(sens_C_max)
+
+```
