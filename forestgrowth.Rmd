@@ -15,14 +15,20 @@ library(here)
 ```
 
 
-### 1. Objective
+### 1. Objective 
+
+The objective of the current assignment is to build a forest size forecast model that considers changes in its growth rate according to the following thresholds: canopy closure and carrying capacity. The measuring unit for forest size is carbon. <br>
+
+The default values for all parameters are shown below: <br>
+
 ```{r}
 # forest growth function
-source(here("ds_test_fgfx.R"))
+source(here("fgfx.R"))
 
-# given parameters
-
+# initial forest size
 C = 10 # initial forest size of 10 kg C
+
+# given default parameters (def means default)
 K_def = 250 # carrying capacity of 250 kg C
 f_def = 50 # canopy closure threshold of 50 kg C
 r_def = 0.01 # exponential growth rate before canopy closure
@@ -30,15 +36,26 @@ g_def = 2 # linear growth rate after canopy closure of 2 kg/year
 
 ```
 
+<br>
+The second part of the assignment evaluates the sensitivity of the output (forest size) considering a normal distribution for all the parameters above (except initial forest size). In this case, we kept the default values as the mean, and the standard deviation is 10% of the mean value. <br>
 
-### 2. Prediction of forest size
+
+### 2. Forest size prediction
+
+We evaluate our forest prediction for the next 300 years. The **Appendix 1** has tur function to estimate the forest growth.
+
 ```{r, results='hide'}
 # run model for 300 years and graph result
 
 # create parameter list
 initialcarbon=C
-years = seq(from=1, to=300, by=1)
-parms = list(r=r_def, K=K_def, f = f_def, g = g_def)
+years = seq(from=1, to=300, by=1) # number of year to evaluate
+
+# insert our default values
+parms = list(r=r_def, 
+             K=K_def, 
+             f = f_def, 
+             g = g_def)
 
 #apply solver
 results=ode(initialcarbon, years, forest_growth, parms)
@@ -47,10 +64,11 @@ results=ode(initialcarbon, years, forest_growth, parms)
 colnames(results)=c("year","C")
 
 # save results in a dataframe
-
 results_df <- as.data.frame(results)
 
 ```
+
+Our results show that around the year 160, our forest reaches the canopy closure threshold and starts a linear growth rate. Around the year 260, the forest size is stable over time (steady-state). The results are not surprising, considering that our canopy closure growth rate (g) is pretty high (2 kg/year).
 
 ```{r}
 # plot
@@ -65,14 +83,18 @@ ggplot(results_df, aes(year, C))+
 
 
 ### 3. Sobol sensitivity analysis
-```{r, results='hide'}
+
+We perform a Sobol sensitivity analysis for the maximum value and mean value of the projected forest size considering the variability of K, r, f, and g. 
+
+In the first part, we generate the normally distributed values for our parameters and test if the ODE performs well.
+
+```{r}
 # run a sobol sensitivity analysis
-# Q: how do estimated max and mean C vary with r, g, f, & K?
+
 # parms are normally distributed with sd 10% of mean value
 
 # set the number of parameters
 np=100
-
 
 # first set of samples
 K = rnorm(mean=K_def, sd=0.1*K_def, n=np)
@@ -88,6 +110,7 @@ K = rnorm(mean=K_def, sd=0.1*K_def, n=np)
 r = rnorm(mean=r_def, sd=0.1*r_def, n=np)
 f = rnorm(mean=f_def, sd=0.1*f_def, n=np)
 g = rnorm(mean=g_def, sd=0.1*g_def, n=np)
+
 # bind the samples for each parameter
 X2 = cbind.data.frame(r=r, K=K , f=f, g=g)
 
@@ -98,12 +121,12 @@ sens_C = soboljansen(model = NULL, X1, X2, nboot = 300)
 simtimes = seq(from=1, to=300) 
 
 # take parameters from the sobel
-
 parms = list(r=sens_C$X$r[1], 
                    K=sens_C$X$K[1], 
                    f=sens_C$X$f[1], 
                    g=sens_C$X$g[1])
 
+# verify our results
 result_2 = ode(y=initialcarbon, times=simtimes, func=forest_growth, parms=parms)
 
 # turn it into a data frame
@@ -111,37 +134,47 @@ head(result_2)
 colnames(result_2)=c("year","C")
 result_df2 = as.data.frame(result_2)
 
-# turn computing our metrics into a function
+```
+<br>
+The second step is to create a function the calculates the maximum and mean value of the forest size for each simulated period. We also evaluate if it works.<br>
 
+```{r}
+# turn computing our metrics into a function
 compute_metrics = function(result) {
-max_c = max(result$C)
-mean_c = mean(result$C)
+ max_c = max(result$C)
+ mean_c = mean(result$C)
 
 return(list(max=max_c, mean=mean_c))}
 
 # check if it works
 compute_metrics(result=result_df2)
+```
+<br>
+Our third step is to create a wrapper function that combines our functions (forest growth and metrics) and keeps our results in a data frame. Then, we apply the new wrapper function to the parameters' values selected by our Sobol's sensitivity. <br>
 
+```{r, results='hide'}
 # define a wrapper function to do everything we need - run solver and compute metrics - and send back results for each parameter
 
 # our # of simulations is already defined, 300 years
 
 c_wrapper = function(r, K, f, g, C, simtimes, func) {
-    parms = list(r=r, K=K, f=f, g=g)
-    result = ode(y=C, times=simtimes, func=func, parms=parms) 
-    colnames(result)=c("year","C")
-  # get metrics
+    parms = list(r=r, K=K, f=f, g=g) # define parameters
+    result = ode(y=C, times=simtimes, func=func, parms=parms) # rund ODE
+    colnames(result)=c("year","C") # name columns
+  # get metric function and keep results as a dataframe
   metrics=compute_metrics(as.data.frame(result))
   return(metrics)
 }
 
-# now use pmap as we did before
+# use pmap to run our wrapper functions for parameter value of our sensitivity analysis
 allresults = sens_C$X %>% pmap(c_wrapper, C=C, simtimes=simtimes, func=forest_growth)
 
 # extract out results from pmap into a data frame
 allres = allresults %>% map_dfr(`[`,c("max","mean"))
 
 ```
+<br>
+Our boxplot visualization for the key metrics shows that significant difference between our maximum an average value. For all simulations, it means that it will take a long time to recover the forest size.
 
 ```{r}
 # create boxplots
@@ -154,6 +187,8 @@ ggplot(tmp, aes(metric, value, col=metric))+
   theme_bw()
 ```
 
+<br>
+Finally, the main effect analysis shows that the forest size has higher sensitivity to the carrying capacity (ignoring interaction with other parameters). For the total effect (taking into account the interaction with other variables), the K is also predominant. This result is logical because the K determines the "ceiling" for the forest size. <br>
 
 ```{r}
 # sobol indice
@@ -181,17 +216,19 @@ plot(sens_C_max)
 #' @parms parms$f - canopy closure threshold
 #' @parms parms$K - carrying capacity
 #' @return change in population 
-#'
+#' Authors: David Segan, Mauricio Collado, Simone Alburqueque and Siya Qiu
+
 forest_growth = function(time, C, parms) {
   
   # compute rate of change of forest
   dexfor = parms$r*C
   
-  # set rate of change to 0 if C is greater than K 
-  # else, set rate of change to g if C is greater than f
-  # else, default rate of change is r*C
   
-  dexfor =ifelse(C > parms$K, 0, ifelse(C > parms$f, parms$g, dexfor))
+  # establish the conditionals between carrying capacity and canopy closure
+  dexfor =ifelse(C > parms$K, 0, # set rate of change to 0 if C > K 
+                 ifelse(C > parms$f, parms$g, # else, set rate of change to g if C > f
+                        dexfor)) # else, default rate of change is r*C
+  
   return(list(dexfor))
 }
 ```
