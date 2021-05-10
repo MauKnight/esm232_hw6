@@ -1,95 +1,137 @@
 ---
-title: "ds_mockup"
-author: "David Segan"
+title: "ESM 232 - Homework 6"
+author: "David Segan, Simone Alburqueque, Siya Qiu and Mauricio Collado"
 date: "5/7/2021"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
 
 library(tidyverse)
 library(deSolve)
 library(sensitivity)
+library(here)
 ```
 
+
+### 1. Objective
 ```{r}
-source("../esm232_hw6/ds_test_fgfx.R")
+# forest growth function
+source(here("ds_test_fgfx.R"))
 
 # given parameters
 
 C = 10 # initial forest size of 10 kg C
-K = 250 # carrying capacity of 250 kg C
-f = 50 # canopy closure threshold of 50 kg C
-r = 0.01 # exponential growth rate before canopy closure
-g = 2 # linear growth rate after canopy closure of 2 kg/year
+K_def = 250 # carrying capacity of 250 kg C
+f_def = 50 # canopy closure threshold of 50 kg C
+r_def = 0.01 # exponential growth rate before canopy closure
+g_def = 2 # linear growth rate after canopy closure of 2 kg/year
 
 ```
 
-```{r}
-# run model for 300 years and graph results
-source("../esm232_hw6/ds_test_fgfx.R")
+
+### 2. Prediction of forest size
+```{r, results='hide'}
+# run model for 300 years and graph result
 
 # create parameter list
 initialcarbon=C
 years = seq(from=1, to=300, by=1)
-parms = list(r=0.01, K=250, f = 50, g = 2)
+parms = list(r=r_def, K=K_def, f = f_def, g = g_def)
 
 #apply solver
-results=ode(initialcarbon, years, forest_growth,parms)
+results=ode(initialcarbon, years, forest_growth, parms)
 
 # add more meaningful names
 colnames(results)=c("year","C")
 
-# plot
-ggplot(as.data.frame(results), aes(year,C))+geom_point()+labs(y="Forest Carbon (kg)", x="Year")
+# save results in a dataframe
+
+results_df <- as.data.frame(results)
+
 ```
 
 ```{r}
+# plot
+ggplot(results_df, aes(year, C))+
+  geom_point()+
+  labs(title="Forest Carbon (Kg.) for the next 300 years", 
+       y="Forest Carbon (Kg.)", 
+       x="Years")+
+  theme_bw()
+
+```
+
+
+### 3. Sobol sensitivity analysis
+```{r, results='hide'}
 # run a sobol sensitivity analysis
 # Q: how do estimated max and mean C vary with r, g, f, & K?
 # parms are normally distributed with sd 10% of mean value
 
 # set the number of parameters
 np=100
+
+
 # first set of samples
-K = rnorm(mean=250, sd=0.1*250, n=np)
-r = rnorm(mean=0.01, sd=0.1*0.01, n=np)
-f = rnorm(mean=50, sd=0.1*50, n=np)
-g = rnorm(mean=2, sd=0.1*2, n=np)
-X1 = cbind.data.frame(r=r, K=K, f=f, g=g)
+K = rnorm(mean=K_def, sd=0.1*K_def, n=np)
+r = rnorm(mean=r_def, sd=0.1*r_def, n=np)
+f = rnorm(mean=f_def, sd=0.1*f_def, n=np)
+g = rnorm(mean=g_def, sd=0.1*g_def, n=np)
+
+# bind the samples for each parameter
+X1 = cbind.data.frame(r=r, K=K , f=f, g=g)
 
 # repeat to get our second set of samples
-K = rnorm(mean=250, sd=0.1*250, n=np)
-r = rnorm(mean=0.01, sd=0.1*0.01, n=np)
-f = rnorm(mean=50, sd=0.1*50, n=np)
-g = rnorm(mean=2, sd=0.1*2, n=np)
-X2 = cbind.data.frame(r=r, K=K, f=f, g=g)
-
-# turn results into a data frame
-results = as.data.frame(results)
+K = rnorm(mean=K_def, sd=0.1*K_def, n=np)
+r = rnorm(mean=r_def, sd=0.1*r_def, n=np)
+f = rnorm(mean=f_def, sd=0.1*f_def, n=np)
+g = rnorm(mean=g_def, sd=0.1*g_def, n=np)
+# bind the samples for each parameter
+X2 = cbind.data.frame(r=r, K=K , f=f, g=g)
 
 # create our sobel object and get sets ofparameters for running the model
-sens_C = soboljansen(model = NULL,X1, X2, nboot = 300)
+sens_C = soboljansen(model = NULL, X1, X2, nboot = 300)
+
+# gets results for 300 years (evaluating every year)
+simtimes = seq(from=1, to=300) 
+
+# take parameters from the sobel
+
+parms = list(r=sens_C$X$r[1], 
+                   K=sens_C$X$K[1], 
+                   f=sens_C$X$f[1], 
+                   g=sens_C$X$g[1])
+
+result_2 = ode(y=initialcarbon, times=simtimes, func=forest_growth, parms=parms)
+
+# turn it into a data frame
+head(result_2)
+colnames(result_2)=c("year","C")
+result_df2 = as.data.frame(result_2)
 
 # turn computing our metrics into a function
-compute_metrics = function(result) {
-  max = max(results$C)
-  mean = mean(results$C)
-return(list(max=max, mean=mean))}
 
-# try it on our first parameter set
-compute_metrics(results)
+compute_metrics = function(result) {
+max_c = max(result$C)
+mean_c = mean(result$C)
+
+return(list(max=max_c, mean=mean_c))}
+
+# check if it works
+compute_metrics(result=result_df2)
 
 # define a wrapper function to do everything we need - run solver and compute metrics - and send back results for each parameter
-simtimes = seq(from=1, to=300, by=1)
 
-c_wrapper = function(r,K,f,g, C, simtimes, func) {
+# our # of simulations is already defined, 300 years
+
+c_wrapper = function(r, K, f, g, C, simtimes, func) {
     parms = list(r=r, K=K, f=f, g=g)
-    results = ode(y=C, times=simtimes, func=func, parms=parms) 
-    colnames(result)=c("time","C")
+    result = ode(y=C, times=simtimes, func=func, parms=parms) 
+    colnames(result)=c("year","C")
   # get metrics
-  metrics=compute_metrics(results)
+  metrics=compute_metrics(as.data.frame(result))
   return(metrics)
 }
 
@@ -99,16 +141,24 @@ allresults = sens_C$X %>% pmap(c_wrapper, C=C, simtimes=simtimes, func=forest_gr
 # extract out results from pmap into a data frame
 allres = allresults %>% map_dfr(`[`,c("max","mean"))
 
+```
+
+```{r}
 # create boxplots
 tmp = allres %>% gather(key="metric", value="value")
-ggplot(tmp, aes(metric, value, col=metric))+geom_boxplot()
-
+ggplot(tmp, aes(metric, value, col=metric))+
+  geom_boxplot() +
+  labs(title="Sensitivity analysis for maximum and mean forest carbon size (300 years)", 
+       y="Values", 
+       x="Metric")+
+  theme_bw()
 ```
+
 
 ```{r}
 # sobol indice
 
-sens_C_max = sensitivity::tell(sens_C,allres$max)
+sens_C_max = sensitivity::tell(sens_C, allres$max)
 
 # first-order indices (main effect without co-variance)
 sens_C_max$S
@@ -119,3 +169,30 @@ sens_C_max$T
 plot(sens_C_max)
 
 ```
+
+
+### Appendix 1: Forest growth function
+```{r, EVAL=FALSE}
+#'  Forest growth
+#' @param T period of growth
+#' @param C size of the forest
+#' @param parms$r - early exponential growth rate
+#' @param parms$g - linear growth rate
+#' @parms parms$f - canopy closure threshold
+#' @parms parms$K - carrying capacity
+#' @return change in population 
+#'
+forest_growth = function(time, C, parms) {
+  
+  # compute rate of change of forest
+  dexfor = parms$r*C
+  
+  # set rate of change to 0 if C is greater than K 
+  # else, set rate of change to g if C is greater than f
+  # else, default rate of change is r*C
+  
+  dexfor =ifelse(C > parms$K, 0, ifelse(C > parms$f, parms$g, dexfor))
+  return(list(dexfor))
+}
+```
+
